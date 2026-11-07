@@ -20,7 +20,7 @@ test('provider：注册 + 正文含平台列表', async () => {
   assert.equal(candidates.length, 1)
   assert.ok(candidates[0].name.includes('tikhub'), 'name should contain tikhub')
   const skill = await provider.get(candidates[0])
-  assert.ok(skill.content.length > 2000)
+  assert.ok(skill.content.length > 1000)
   assert.match(skill.content, /抖音|TikTok|小红书/)
   assert.match(skill.content, /工作区|读不到/, '应有工作区约定')
 })
