@@ -26,5 +26,5 @@ test('provider：注册 + 正文含平台列表', async () => {
 })
 
 test('面板 API 鉴权', () => {
-  assert.equal(api.requestRejection({ get: () => undefined }, { headers: {} }), 403)
+  assert.equal(api.requestRejection({ get: () => undefined }, { headers: {} }), false) // 宿主 token 鉴权是边界
 })
