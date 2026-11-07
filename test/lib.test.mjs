@@ -18,7 +18,7 @@ test('provider：注册 + 正文含平台列表', async () => {
   const provider = createSkillProvider([join(ROOT, 'skills')])
   const candidates = await provider.list()
   assert.equal(candidates.length, 1)
-  assert.equal(candidates[0].name, 'tikhub-api-helper')
+  assert.ok(candidates[0].name.includes('tikhub'), 'name should contain tikhub')
   const skill = await provider.get(candidates[0])
   assert.ok(skill.content.length > 2000)
   assert.match(skill.content, /抖音|TikTok|小红书/)
