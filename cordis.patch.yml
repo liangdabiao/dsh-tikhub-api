@@ -1,0 +1,4 @@
+# TikHub API 助手技能快照。
+- insert:
+    - id: tikhub-api
+      name: 'dsh-tikhub-api'
