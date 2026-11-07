@@ -8,6 +8,13 @@ DeepSeek Harness（dsh）插件：**TikHub 多平台社交媒体数据 API** 的
 
 需要 [TikHub](https://www.tikhub.io) token（Configuration 填写或环境变量传入）。
 
+
+## 安装
+
+```bash
+dsh plugin --profile web add dsh-tikhub-api
+```
+
 ## 许可
 
 MIT
