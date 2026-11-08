@@ -93,7 +93,52 @@ function GuideTab() {
         h('br'), '调用按 TikHub 计费规则消耗点数，批量抓取前先确认额度。')))
 }
 
-const TABS = [['calls', '调用历史'], ['endpoints', '端点库'], ['guide', '指南']]
+
+// ---------- 设置：面板内直配 TikHub token（存本机，永不上传/回显明文） ----------
+function SettingsTab() {
+  const [info, setInfo] = useState(null)
+  const [token, setToken] = useState('')
+  const [msg, setMsg] = useState('')
+  const [error, setError] = useState('')
+  const load = useCallback(() => {
+    fetchJson('/api/config').then(setInfo).catch((e) => setError(e.message))
+  }, [])
+  useEffect(() => { load() }, [load])
+  const save = async () => {
+    setError(''); setMsg('')
+    if (!token.trim()) { setError('先粘贴 TikHub token。'); return }
+    try {
+      const d = await fetch(BASE + '/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tikhubToken: token.trim() }) }).then(r => r.json())
+      if (d.error) throw new Error(d.error)
+      setInfo(d.credentials); setToken('')
+      setMsg('已保存（存本机 $DSH_HOME/tikhub-api/settings.json，不会上传）。现在可以回「调用历史」发起真实调用。')
+    } catch (e) { setError(e.message) }
+  }
+  const clear = async () => {
+    setError(''); setMsg('')
+    try {
+      const d = await fetch(BASE + '/api/config', { method: 'DELETE' }).then(r => r.json())
+      if (d.error) throw new Error(d.error)
+      setInfo(d.credentials); setMsg('已清除本机保存的 token。')
+    } catch (e) { setError(e.message) }
+  }
+  return h('div', null,
+    h('div', { style: styles.card },
+      h('div', { style: styles.sectionTitle }, '⚙️ TikHub token'),
+      info === null ? h('div', { style: styles.muted }, '加载中…')
+        : h('div', { style: styles.muted },
+            info.configured ? `已配置 ✓（${info.tokenMasked}）` : '未配置。粘贴下面并保存，即可真实调用。'),
+      h('input', { type: 'password', placeholder: 'TikHub token（sk-... 或用户中心 token）', value: token, onChange: (e) => setToken(e.target.value), style: { ...styles.search, marginBottom: 8 } }),
+      h('div', { style: styles.row },
+        h('button', { style: styles.button, onClick: save }, '保存'),
+        info?.configured ? h('button', { style: styles.tab, onClick: clear }, '清除已存') : null),
+      msg ? h('div', { style: styles.ok }, msg) : null,
+      error ? h('div', { style: styles.error }, error) : null,
+      h('div', { style: { ...styles.muted, fontSize: 12, lineHeight: 1.8 } },
+        '获取：api.tikhub.io 用户中心 → API Token。密钥只存本机（$DSH_HOME/tikhub-api/settings.json），任何接口不回显明文。')))
+}
+
+const TABS = [['calls', '调用历史'], ['endpoints', '端点库'], ['settings', '⚙️ 设置'], ['guide', '指南']]
 
 function Panel() {
   const [tab, setTab] = useState('calls')
@@ -102,10 +147,11 @@ function Panel() {
       TABS.map(([id, label]) => h('button', {
         key: id, style: tab === id ? styles.tabActive : styles.tab, onClick: () => setTab(id),
       }, label))),
-    tab === 'calls' ? h(CallsTab) : tab === 'endpoints' ? h(EndpointsTab) : h(GuideTab))
+    tab === 'calls' ? h(CallsTab) : tab === 'endpoints' ? h(EndpointsTab) : tab === 'settings' ? h(SettingsTab) : h(GuideTab))
 }
 
 const styles = {
+  ok: { color: '#1a7f37', marginTop: 6 },
   wrap: { padding: 16, overflow: 'auto', height: '100%', boxSizing: 'border-box', fontFamily: '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif', fontSize: 13, color: '#1a1a1a' },
   tabBar: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   tab: { padding: '8px 16px', border: '1px solid #d9d9de', borderRadius: 8, background: '#fff', color: '#1a1a1a', cursor: 'pointer', fontSize: 13 },

@@ -7,6 +7,7 @@ import { registerApi } from '../lib/api.js'
 import { indexEndpoints, searchEndpoints } from '../lib/endpoints.js'
 import { callTikHub } from '../lib/client.js'
 import { readHistory, appendHistory, updateHistory, clearHistory } from '../lib/data.js'
+import { resolveToken, maskSettings, saveSettings, clearSettings } from '../lib/settings.js'
 
 export const name = 'tikhub-api'
 export const inject = ['tools', 'skills', 'webServer', 'connection']
@@ -91,7 +92,7 @@ export const tikhubEndpointTool = {
 export const tikhubCallTool = {
   name: 'tikhub_call',
   description:
-    '真实调用 TikHub API（GET https://api.tikhub.io/<path>）。需要用户在插件 Config 配置 tikhubToken。' +
+    '真实调用 TikHub API（GET https://api.tikhub.io/<path>）。token 在面板「⚙️ 设置」标签配置（或插件 Config / TIKHUB_TOKEN 环境变量）。' +
     '先用 tikhub_endpoint 找端点，再传 path 与 query params。调用自动入历史（可在面板查看）；响应超过 6000 字符会被截断，完整数据以工作区文件为准。',
   parameters: {
     type: 'object',
@@ -113,7 +114,7 @@ export const tikhubCallTool = {
       try { params = JSON.parse(args.params) } catch { throw new Error('params 不是合法 JSON，如 {"keyword":"保温杯"}。') }
     }
     const cfg = configRef.config
-    const token = (typeof cfg?.tikhubToken === 'string' && cfg.tikhubToken) || process.env.TIKHUB_TOKEN || ''
+    const token = resolveToken(cfg)
     const record = {
       id: `call-${Date.now()}`,
       ts: new Date().toISOString(),
