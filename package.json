@@ -51,5 +51,8 @@
     "build": "node scripts/build.mjs",
     "test": "node test/lib.test.mjs",
     "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.19.0"
   }
 }
