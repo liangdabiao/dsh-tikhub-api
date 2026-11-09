@@ -8,6 +8,15 @@ DeepSeek Harness（dsh）插件：**TikHub 多平台社交媒体数据 API** 的
 
 需要 [TikHub](https://www.tikhub.io) token：侧栏「⚙️ 设置」里直接粘贴保存（或插件 Config / `TIKHUB_TOKEN` 环境变量）。
 
+## 端点索引：以线上 OpenAPI 为准
+
+技能自带的 `openapi.json` 和 markdown 文档会过期（实测：`xiaohongshu/web/search_notes` 已下线，实际用 `app_v2/search_notes`）。插件改为优先使用线上 spec：
+
+- 面板「🔎 端点库」→「🔄 同步线上 OpenAPI」（拉 `https://api.tikhub.io/openapi.json`，缓存到 `$DSH_HOME/tikhub-api/openapi.live.json`）
+- 工具 `tikhub_endpoint action=openapi` 同样同步；`list/search` **首次会自动同步**（失败回落本地快照），并优先展示线上路径
+- 文档里有、线上没有的路径会标「文档·线上未收录」
+- `tikhub_call` 返回 404 时自动列出线上 spec 里的相近端点（例如 `xiaohongshu/web/search_notes` → `xiaohongshu/app_v2/search_notes`）
+
 ## 侧栏工作台
 
 | 标签 | 内容 |

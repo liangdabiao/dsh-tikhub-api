@@ -1,5 +1,6 @@
 // dsh-tikhub-api 单测（node test/lib.test.mjs 直接跑）。
 process.env.DSH_HOME = new URL('../.tmp/test-home/', import.meta.url).pathname.replace(/^\/([A-Za-z]):/, '$1:')
+process.env.TIKHUB_NO_LIVE = '1' // 单测零网络：不走线上 OpenAPI 自动同步
 
 import assert from 'node:assert/strict'
 import { rmSync, readFileSync } from 'node:fs'
@@ -19,7 +20,8 @@ async function test(name, fn) {
 }
 
 // ── endpoints.js ───────────────────────────────────────────
-const { indexEndpoints, searchEndpoints } = await import('../lib/endpoints.js')
+const { indexEndpoints, searchEndpoints, mergedEndpoints, searchMerged } = await import('../lib/endpoints.js')
+const openapi = await import('../lib/openapi.js')
 
 await test('endpoints: 文档索引到多个 api/v1 端点', async () => {
   const all = indexEndpoints(SKILL_DIRS)
@@ -32,6 +34,30 @@ await test('endpoints: search 平台关键词', async () => {
   assert.ok(searchEndpoints(SKILL_DIRS, 'douyin').length >= 1)
   assert.ok(searchEndpoints(SKILL_DIRS, 'profile').length >= 1)
   assert.equal(searchEndpoints(SKILL_DIRS, 'zzz不存在').length, 0)
+})
+
+await test('openapi: 本地 spec 含 app_v2/search_notes，404 替代路径优先 app_v2', async () => {
+  const local = openapi.findLocalSpec(SKILL_DIRS)
+  assert.ok(local?.spec, '应找到本地 openapi.json')
+  const all = openapi.indexSpec(local.spec)
+  assert.ok(all.some((e) => e.path === 'api/v1/xiaohongshu/app_v2/search_notes'))
+  const sug = openapi.suggestPaths(local.spec, 'api/v1/xiaohongshu/web/search_notes', 5)
+  assert.ok(sug.some((s) => s.path === 'api/v1/xiaohongshu/app_v2/search_notes'), sug.map((s) => s.path).join(','))
+  // 不能推荐用户刚调过的那条（它已经 404）
+  assert.ok(!sug.some((s) => s.path === 'api/v1/xiaohongshu/web/search_notes'))
+  // 不能混进无关平台（平台段要靠 tail/归一化路径命中才算）
+  assert.ok(sug.every((s) => s.path.includes('/xiaohongshu/')), sug.map((s) => s.path).join(','))
+})
+
+await test('endpoints: 线上 spec 优先，文档旧路径标 stale', async () => {
+  const fakeSpec = { info: { version: 'live-test' }, paths: { '/api/v1/xiaohongshu/app_v2/search_notes': { get: { summary: '搜索笔记' } } } }
+  const merged = mergedEndpoints(SKILL_DIRS, fakeSpec)
+  const app = merged.find((e) => e.path === 'api/v1/xiaohongshu/app_v2/search_notes')
+  assert.equal(app.source, 'openapi')
+  const web = merged.find((e) => e.path === 'api/v1/xiaohongshu/web/search_notes')
+  assert.ok(web, '文档里的旧路径保留')
+  assert.equal(web.stale, true)
+  assert.ok(searchMerged(merged, 'search_notes').some((e) => e.path.includes('app_v2/search_notes')))
 })
 
 // ── data.js ────────────────────────────────────────────────

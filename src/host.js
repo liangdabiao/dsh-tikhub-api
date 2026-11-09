@@ -4,7 +4,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSkillProvider } from '../lib/skills.js'
 import { registerApi } from '../lib/api.js'
-import { indexEndpoints, searchEndpoints } from '../lib/endpoints.js'
+import { mergedEndpoints, searchMerged } from '../lib/endpoints.js'
+import { readCachedSpec, findLocalSpec, fetchLiveSpec, indexSpec, searchSpec, suggestPaths, specMeta } from '../lib/openapi.js'
 import { callTikHub } from '../lib/client.js'
 import { readHistory, appendHistory, updateHistory, clearHistory, getHistory, deleteHistory } from '../lib/data.js'
 import { resolveToken, maskSettings, saveSettings, clearSettings } from '../lib/settings.js'
@@ -53,22 +54,27 @@ const OUTPUT = {
 }
 
 const result = (ok, summary, data = '') => ({ ok, summary, data })
+const vlabel = (v) => {
+  const s = String(v || '').trim()
+  return s ? (s.startsWith('V') || s.startsWith('v') ? 'V' + s.replace(/^[Vv]/, '') : `V${s}`) : 'V?'
+}
 
 // ---------------------------------------------------------------------------
-// 工具 1：tikhub_endpoint —— 从技能文档索引 TikHub API 端点
+// 工具 1：tikhub_endpoint —— 技能文档 + 线上 OpenAPI 的端点索引
 // ---------------------------------------------------------------------------
 export const tikhubEndpointTool = {
   name: 'tikhub_endpoint',
   description:
-    '在 TikHub 技能文档中索引/搜索 API 端点（api/v1/... 路径 + 用法上下文）。' +
-    '调 tikhub_call 之前先用它找到正确端点：search 按平台/功能关键词（如「小红书」「douyin」「user_profile」「search」）。',
+    '索引/搜索 TikHub API 端点。**以线上 OpenAPI 为准**：action=openapi 会拉取 https://api.tikhub.io/openapi.json 并缓存，' +
+    'list/search 优先用线上 spec（技能文档里的 web 路径可能已下线，如 xiaohongshu/web/search_notes 已不存在，实际用 app_v2/search_notes）。' +
+    '调 tikhub_call 之前先用它找正确端点；返回 404 时也先跑 action=openapi。',
   parameters: {
     type: 'object',
     additionalProperties: false,
     required: ['action'],
     properties: {
-      action: str('list 列全部已知端点；search 关键词搜索', { enum: ['list', 'search'] }),
-      keyword: str('search：关键词，如「xiaohongshu」「douyin」「tiktok」「profile」「search」'),
+      action: str('list 列已知端点；search 关键词搜索；openapi 同步线上 spec（可带 keyword）', { enum: ['list', 'search', 'openapi'] }),
+      keyword: str('search/openapi：关键词，如「xiaohongshu」「search_notes」「douyin」「profile」'),
       limit: num('最多返回条数，默认 15'),
     },
   },
@@ -76,13 +82,48 @@ export const tikhubEndpointTool = {
   async execute(args) {
     check(args, this.parameters)
     const skillDirs = skillDirsRef.dirs
-    const endpoints = args.action === 'search'
-      ? (args.keyword ? searchEndpoints(skillDirs, args.keyword) : [])
-      : indexEndpoints(skillDirs)
-    const sliced = endpoints.slice(0, args.limit || 15)
-    if (!sliced.length) return result(false, args.action === 'search' ? `没有匹配「${args.keyword}」的端点，试试 list 看全部。` : '技能文档里没有找到端点。')
-    return result(true, `${args.action === 'search' ? `匹配到 ${sliced.length}` : `共 ${endpoints.length} 个已知端点，显示前 ${sliced.length}`} 个：`,
-      sliced.map((e) => `- ${e.path}${e.docs.length ? `（见 ${e.docs.join('、')}）` : ''}${e.samples[0] ? `\n  ${e.samples[0]}` : ''}`).join('\n'))
+    const limit = args.limit || 15
+    const fmt = (e) => {
+      const tag = e.source === 'openapi' ? '线上' : e.stale ? '文档·线上未收录' : '文档'
+      return `- ${e.path} [${tag}]${e.summary ? ` · ${e.summary}` : ''}`
+    }
+
+    if (args.action === 'openapi') {
+      let live
+      try {
+        live = await fetchLiveSpec()
+      } catch (err) {
+        const cached = readCachedSpec()
+        if (!cached) return result(false, `线上 OpenAPI 获取失败：${err?.message || err}。网络恢复后再试，或先看本地快照/文档（可能过期）。`)
+        const meta = specMeta(cached)
+        const hits = args.keyword ? searchSpec(indexSpec(cached.spec), args.keyword).slice(0, limit) : []
+        return result(true, `线上获取失败（${err?.message || err}），使用缓存快照：${vlabel(meta.version)} · ${meta.paths} 条 · ${meta.fetchedAt}`,
+          hits.length ? hits.map(fmt).join('\n') : '（未指定 keyword；缓存已可用于 list/search）')
+      }
+      const meta = specMeta(live)
+      const all = indexSpec(live.spec)
+      const hits = args.keyword ? searchSpec(all, args.keyword) : all
+      const sliced = hits.slice(0, limit)
+      return result(true,
+        `已同步线上 OpenAPI：${vlabel(meta.version)} · ${meta.paths} 条路径 · ${meta.source}${args.keyword ? ` · 匹配 ${hits.length} 条，显示 ${sliced.length}` : ` · 显示前 ${sliced.length}`}`,
+        sliced.length ? sliced.map(fmt).join('\n') : `没有匹配「${args.keyword}」的线上端点。`)
+    }
+
+    const rec = await currentSpecRecord(skillDirs)
+    const spec = rec?.spec || null
+    const base = mergedEndpoints(skillDirs, spec)
+    const list = args.action === 'search' ? searchMerged(base, args.keyword || '') : base
+    const sliced = list.slice(0, limit)
+    const meta = rec ? specMeta(rec) : null
+    const metaNote = rec?.fetchedAt
+      ? `线上 ${vlabel(meta.version)}（${meta.paths} 条，${meta.fetchedAt}）`
+      : rec ? '本地 OpenAPI 快照（可能过期，建议 action=openapi 同步）' : '仅技能文档（可能过期，建议 action=openapi 同步）'
+    if (!sliced.length) {
+      return result(false, args.action === 'search' ? `没有匹配「${args.keyword}」的端点。先 action=openapi 同步线上 spec 再搜。` : '没有端点。先 action=openapi 同步线上 spec。')
+    }
+    return result(true,
+      `${metaNote} · ${args.action === 'search' ? `匹配 ${list.length} 条，显示 ${sliced.length}` : `共 ${base.length} 个端点，显示前 ${sliced.length}`}：`,
+      sliced.map(fmt).join('\n'))
   },
 }
 
@@ -130,8 +171,21 @@ export const tikhubCallTool = {
       // 存一份响应片段进历史，面板「调研历史」可直接展开阅读（完整数据仍以工作区文件为准）。
       updateHistory(record.id, { status: status < 400 ? 'ok' : 'error', httpStatus: status, ms, responseSnippet: body.slice(0, 4000) })
       const truncated = body.length > 6000 ? `${body.slice(0, 6000)}\n…（响应过长已截断 ${body.length} 字符，建议把分析重点写进工作区文件）` : body
+      // 404 时给出线上 spec 里的相近端点（技能文档路径可能已下线）。
+      let hint = ''
+      if (status === 404) {
+        const cached = readCachedSpec()
+        const local = findLocalSpec(skillDirsRef.dirs)
+        const spec = cached?.spec || local?.spec
+        const suggestions = spec ? suggestPaths(spec, args.path, 5) : []
+        hint = suggestions.length
+          ? `\n\n⚠️ 该路径返回 404，可能已下线。线上 spec 里的相近端点：\n${suggestions.map((s) => `- ${s.path}${s.summary ? ` · ${s.summary}` : ''}`).join('\n')}\n先 tikhub_endpoint action=openapi 同步线上 spec，再用上面的路径重试。`
+          : spec
+            ? '\n\n⚠️ 该路径返回 404；线上 spec 里没有相近端点，可能该功能已下线。用 tikhub_endpoint action=openapi 搜索可用端点。'
+            : '\n\n⚠️ 该路径返回 404。先 tikhub_endpoint action=openapi 同步线上 spec，再按 spec 里的路径重试。'
+      }
       return result(status < 400,
-        `HTTP ${status}（${ms}ms）${args.note ? ` · ${args.note}` : ''}。完整响应可在面板「调用历史」查看。`,
+        `HTTP ${status}（${ms}ms）${args.note ? ` · ${args.note}` : ''}。完整响应可在面板「调用历史」查看。${hint}`,
         truncated)
     } catch (err) {
       updateHistory(record.id, { status: 'error', error: String(err?.message || err).slice(0, 300) })
@@ -187,6 +241,23 @@ export const tikhubHistoryTool = {
 }
 
 const skillDirsRef = { dirs: [] }
+let autoSyncFailedAt = 0
+
+// 端点查询默认也要用线上 spec：没有缓存时自动同步一次，失败再回落本地快照。
+async function currentSpecRecord(skillDirs) {
+  const cached = readCachedSpec()
+  if (cached) return cached
+  if (process.env.TIKHUB_NO_LIVE !== '1' && Date.now() - autoSyncFailedAt > 60_000) {
+    try {
+      const live = await fetchLiveSpec(12_000)
+      return { spec: live.spec, fetchedAt: live.fetchedAt, source: live.source }
+    } catch {
+      autoSyncFailedAt = Date.now()
+    }
+  }
+  const local = findLocalSpec(skillDirs)
+  return local ? { spec: local.spec, fetchedAt: '', source: local.file } : null
+}
 
 export function apply(ctx) {
   const skillDirs = [join(dirname(fileURLToPath(import.meta.url)), '..', 'skills')]

@@ -35,6 +35,11 @@ function fmtTime(iso) {
   } catch { return iso || '' }
 }
 
+const vlabel = (v) => {
+  const s = String(v || '').trim()
+  return s ? 'V' + s.replace(/^[Vv]/, '') : 'V?'
+}
+
 const SOURCE_LABEL = { panel: '面板已保存', config: '插件 Config', env: 'TIKHUB_TOKEN 环境变量', none: '未配置' }
 
 function statusText(r) {
@@ -191,27 +196,56 @@ function HistoryTab(props) {
 // ---------------------------------------------------------------------------
 function EndpointsTab() {
   const [endpoints, setEndpoints] = useState(null)
+  const [spec, setSpec] = useState(null)
   const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
   const [query, setQuery] = useState('')
-  useEffect(() => {
-    fetchJson('/api/endpoints').then((d) => setEndpoints(d.endpoints)).catch((e) => setError(e.message))
-  }, [])
-  if (error) return h('div', { style: styles.error }, error)
+  const [syncing, setSyncing] = useState(false)
+  const load = () => fetchJson('/api/endpoints')
+    .then((d) => { setEndpoints(d.endpoints); setSpec(d.spec) })
+    .catch((e) => setError(e.message))
+  useEffect(() => { load() }, [])
+  const sync = async () => {
+    setSyncing(true); setError(''); setMsg('')
+    try {
+      const d = await fetch(BASE + '/api/openapi/refresh', { method: 'POST' }).then((r) => r.json())
+      if (d.error) throw new Error(d.error)
+      setMsg(`已同步线上 OpenAPI：${vlabel(d.version)} · ${d.paths} 条路径`)
+      await load()
+    } catch (e) { setError(e.message) } finally { setSyncing(false) }
+  }
+  if (error && endpoints === null) return h('div', { style: styles.error }, error)
   if (endpoints === null) return h('div', { style: styles.muted }, '加载中…')
 
   const q = query.trim().toLowerCase()
-  const filtered = q ? endpoints.filter((e) => `${e.path} ${e.samples.join(' ')}`.toLowerCase().includes(q)) : endpoints
+  const filtered = q
+    ? endpoints.filter((e) => `${e.path} ${e.summary || ''} ${(e.samples || []).join(' ')}`.toLowerCase().includes(q))
+    : endpoints
+  const specLine = spec
+    ? `线上 OpenAPI ${vlabel(spec.version)} · ${spec.paths} 条路径${spec.fetchedAt && spec.fetchedAt !== '本地快照' ? ` · 同步于 ${fmtTime(spec.fetchedAt)}` : ' · 本地快照（建议同步线上）'}`
+    : '未同步线上 OpenAPI（当前仅技能文档，路径可能过期）'
 
   return h('div', null,
-    h('input', { style: styles.search, placeholder: '搜索端点，如「xiaohongshu」「douyin」「search」…', value: query, onChange: (e) => setQuery(e.target.value) }),
-    h('div', { style: styles.mutedSmall, marginBottom: 8 }, `文档索引到 ${endpoints.length} 个端点${q ? `，匹配 ${filtered.length} 个` : ''}`),
+    h('div', { style: styles.card },
+      h('div', { style: styles.row },
+        h('span', { style: styles.sectionTitle }, '🔎 端点库'),
+        h('span', { style: styles.grow }),
+        h('button', { style: styles.actionBtn, onClick: sync, disabled: syncing }, syncing ? '同步中…' : '🔄 同步线上 OpenAPI')),
+      h('div', { style: styles.mutedSmall }, specLine),
+      msg ? h('div', { style: styles.ok }, msg) : null,
+      error ? h('div', { style: styles.error }, error) : null,
+      spec && !spec.fetchedAt?.includes('T') ? h('div', { style: styles.hint }, '本地 openapi.json 是随技能分发的快照，可能落后；点「同步线上 OpenAPI」以线上为准。') : null),
+    h('input', { style: styles.search, placeholder: '搜索端点，如「xiaohongshu」「search_notes」「douyin」…', value: query, onChange: (e) => setQuery(e.target.value) }),
+    h('div', { style: styles.mutedSmall, marginBottom: 8 }, `共 ${endpoints.length} 个端点${q ? `，匹配 ${filtered.length} 个` : ''}`),
     filtered.map((e) => h('div', { key: e.path, style: styles.card },
       h('div', { style: styles.row },
         h('span', { style: styles.callPath }, e.path),
+        e.source === 'openapi' ? h('span', { style: styles.tag }, '线上') : h('span', { style: styles.warnTag }, e.stale ? '文档·线上未收录' : '文档'),
         h('span', { style: styles.grow }),
         h('button', { style: styles.actionBtn, onClick: () => act(`用 tikhub_call 调用 ${e.path}，参数：`) }, '用这个调研')),
-      e.samples.map((s, i) => h('div', { key: i, style: styles.mutedSmall }, s)),
-      e.docs.length ? h('div', { style: styles.mutedSmall }, `来源：${e.docs.join('、')}`) : null)))
+      e.summary ? h('div', { style: styles.mutedSmall }, e.summary) : null,
+      (e.samples || []).map((s, i) => h('div', { key: i, style: styles.mutedSmall }, s)),
+      (e.docs || []).length ? h('div', { style: styles.mutedSmall }, `来源：${e.docs.join('、')}`) : null)))
 }
 
 // ---------------------------------------------------------------------------
@@ -274,10 +308,18 @@ function GuideTab() {
         h('div', { style: styles.quote }, '「TikTok 搜 #kitchen gadget 的热门视频」'),
         '模型先调 tikhub_endpoint 找端点，再 tikhub_call 真实调用，结果自动进「调研历史」。')),
     h('div', { style: styles.card },
+      h('div', { style: styles.sectionTitle }, '调用返回 404 / 路径过期怎么办'),
+      h('div', { style: styles.stepList },
+        '技能文档里的 web 路径可能已下线（例如 xiaohongshu/web/search_notes 已不存在，实际用 app_v2/search_notes）。按这个顺序排查：',
+        h('div', { style: styles.quote }, '1. tikhub_endpoint action=openapi  → 同步线上 OpenAPI'),
+        h('div', { style: styles.quote }, '2. tikhub_endpoint action=search keyword=search_notes  → 用线上路径'),
+        h('div', { style: styles.quote }, '3. tikhub_call 用 spec 里的完整路径重试'),
+        'tikhub_call 遇到 404 会自动从线上 spec 里列出相近端点。')),
+    h('div', { style: styles.card },
       h('div', { style: styles.sectionTitle }, '3 个工具'),
       h('div', { style: styles.muted, lineHeight: 2 },
-        h('b', null, 'tikhub_endpoint'), ' — 从技能文档索引/搜索 API 端点（api/v1/… 路径 + 用法上下文）。',
-        h('br'), h('b', null, 'tikhub_call'), ' — 真实 GET 调用（需配置 token），自动入调研历史。',
+        h('b', null, 'tikhub_endpoint'), ' — 端点索引：list/search 以线上 OpenAPI 为准；openapi 同步线上 spec。',
+        h('br'), h('b', null, 'tikhub_call'), ' — 真实 GET 调用（需配置 token），自动入调研历史，404 给替代路径。',
         h('br'), h('b', null, 'tikhub_history'), ' — 列表 / 详情 / 删除 / 清空调研历史。')),
     h('div', { style: styles.card },
       h('div', { style: styles.sectionTitle }, '前置条件'),
@@ -343,7 +385,9 @@ const styles = {
   status: { fontWeight: 700, fontSize: 12, minWidth: 52 },
   note: { background: '#e8eef7', color: '#1d3557', borderRadius: 4, padding: '1px 6px', fontSize: 11 },
   tag: { background: '#e7f6ec', color: '#1a7f37', borderRadius: 4, padding: '1px 6px', fontSize: 11 },
+  warnTag: { background: '#fff6e0', color: '#8a6d1a', borderRadius: 4, padding: '1px 6px', fontSize: 11 },
   muted: { color: '#8a8a92', lineHeight: 1.8 },
+  hint: { background: '#fff8e6', border: '1px solid #f0dca8', borderRadius: 8, padding: '8px 10px', color: '#8a6d1a', fontSize: 12, lineHeight: 1.7, marginTop: 6 },
   mutedSmall: { color: '#a0a0a8', fontSize: 11.5, lineHeight: 1.7 },
   ok: { color: '#1a7f37', marginTop: 6 },
   error: { color: '#c0392b', padding: 12 },
