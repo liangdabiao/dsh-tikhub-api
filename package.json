@@ -1,7 +1,7 @@
 {
   "name": "dsh-tikhub-api",
-  "version": "0.2.0",
-  "description": "TikHub API 工作台：文档端点索引/搜索、真实 GET 调用（token 走 Config）、调用历史持久化。3 个原生工具 + 侧栏端点库/调用历史面板。",
+  "version": "0.4.0",
+  "description": "TikHub 社媒调研工作台：文档端点索引/搜索、真实 GET 调用（token 走 Config/面板）、调研历史持久化（可展开响应/删除/再调）。3 个原生工具 + 侧栏概览/调研历史/端点库/设置面板。",
   "license": "MIT",
   "type": "module",
   "main": "src/host.js",

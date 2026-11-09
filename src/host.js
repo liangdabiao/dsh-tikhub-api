@@ -6,7 +6,7 @@ import { createSkillProvider } from '../lib/skills.js'
 import { registerApi } from '../lib/api.js'
 import { indexEndpoints, searchEndpoints } from '../lib/endpoints.js'
 import { callTikHub } from '../lib/client.js'
-import { readHistory, appendHistory, updateHistory, clearHistory } from '../lib/data.js'
+import { readHistory, appendHistory, updateHistory, clearHistory, getHistory, deleteHistory } from '../lib/data.js'
 import { resolveToken, maskSettings, saveSettings, clearSettings } from '../lib/settings.js'
 
 export const name = 'tikhub-api'
@@ -127,7 +127,8 @@ export const tikhubCallTool = {
     try {
       const { status, json, ms } = await callTikHub(args.path, params, token, (args.timeout || 30) * 1000)
       const body = typeof json === 'string' ? json : JSON.stringify(json, null, 2)
-      updateHistory(record.id, { status: status < 400 ? 'ok' : 'error', httpStatus: status, ms })
+      // 存一份响应片段进历史，面板「调研历史」可直接展开阅读（完整数据仍以工作区文件为准）。
+      updateHistory(record.id, { status: status < 400 ? 'ok' : 'error', httpStatus: status, ms, responseSnippet: body.slice(0, 4000) })
       const truncated = body.length > 6000 ? `${body.slice(0, 6000)}\n…（响应过长已截断 ${body.length} 字符，建议把分析重点写进工作区文件）` : body
       return result(status < 400,
         `HTTP ${status}（${ms}ms）${args.note ? ` · ${args.note}` : ''}。完整响应可在面板「调用历史」查看。`,
@@ -140,17 +141,20 @@ export const tikhubCallTool = {
 }
 
 // ---------------------------------------------------------------------------
-// 工具 3：tikhub_history —— 调用历史
+// 工具 3：tikhub_history —— 调研历史（列表 / 详情 / 删除 / 清空）
 // ---------------------------------------------------------------------------
 export const tikhubHistoryTool = {
   name: 'tikhub_history',
-  description: '查询/清空 TikHub API 调用历史：每次调用的路径、参数、HTTP 状态、耗时、时间。用户问「刚才调了什么接口」时使用。',
+  description:
+    '查询/读取/删除 TikHub API 调研历史（每次调用的路径、参数、状态、耗时、响应片段）。' +
+    'list 看列表；get 按 id 读详情（含响应片段）；delete 删单条；clear 清空。用户问「刚才调了什么接口/结果是什么」时使用。',
   parameters: {
     type: 'object',
     additionalProperties: false,
     required: ['action'],
     properties: {
-      action: str('list 列历史；clear 清空（需 confirm）', { enum: ['list', 'clear'] }),
+      action: str('list 列表；get 详情；delete 删单条；clear 清空（需 confirm）', { enum: ['list', 'get', 'delete', 'clear'] }),
+      id: str('get/delete：记录 id（list 里能看到）'),
       limit: num('list：最多返回条数，默认 15'),
       confirm: str('clear 必须传 "yes"', { enum: ['yes'] }),
     },
@@ -161,13 +165,24 @@ export const tikhubHistoryTool = {
     if (args.action === 'clear') {
       if (args.confirm !== 'yes') return result(false, '清空历史请用 confirm:"yes" 确认。')
       clearHistory()
-      return result(true, '调用历史已清空。')
+      return result(true, '调研历史已清空。')
+    }
+    if (args.action === 'get') {
+      if (!args.id) throw new Error('get 需要 id（从 list 里找）。')
+      const record = getHistory(args.id)
+      if (!record) return result(false, `没有找到记录 ${args.id}。`)
+      return result(true, `记录 ${args.id}（${record.status}）`, JSON.stringify(record, null, 2))
+    }
+    if (args.action === 'delete') {
+      if (!args.id) throw new Error('delete 需要 id（从 list 里找）。')
+      const removed = deleteHistory(args.id)
+      return result(removed, removed ? `已删除记录 ${args.id}。` : `没有找到记录 ${args.id}。`)
     }
     const all = readHistory()
     const list = all.slice(0, args.limit || 15)
-    if (!list.length) return result(true, '还没有调用历史。先用 tikhub_endpoint 找端点，再 tikhub_call 调用。')
+    if (!list.length) return result(true, '还没有调研历史。先用 tikhub_endpoint 找端点，再 tikhub_call 调用。')
     return result(true, `共 ${all.length} 条，最近 ${list.length} 条：`,
-      list.map((r) => `- ${r.ts} [${r.status}${r.httpStatus ? ' ' + r.httpStatus : ''}] ${r.path} ${JSON.stringify(r.params)}${r.note ? ` · ${r.note}` : ''}`).join('\n'))
+      list.map((r) => `- ${r.ts} [${r.status}${r.httpStatus ? ' ' + r.httpStatus : ''}] ${r.path} ${JSON.stringify(r.params)}${r.note ? ` · ${r.note}` : ''}${r.responseSnippet ? ' · 有响应片段' : ''}\n  id=${r.id}`).join('\n'))
   },
 }
 
