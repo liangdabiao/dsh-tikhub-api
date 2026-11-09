@@ -39,7 +39,7 @@ python explore_openapi.py --search "小红书评论"
 
 ```bash
 curl -H "Authorization: Bearer $TIKHUB_TOKEN" \
-  "https://api.tikhub.io/api/v1/xiaohongshu/web/search_notes?keyword=关键词&page=1"
+  "https://api.tikhub.io/api/v1/xiaohongshu/app_v2/search_notes?keyword=关键词&page=1"
 ```
 
 ### 频率限制

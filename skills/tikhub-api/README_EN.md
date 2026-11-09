@@ -115,7 +115,7 @@ python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/tiktok/web/fet
 python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/youtube/web/get_trending_videos "country=US"
 
 # Search Xiaohongshu notes
-python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/xiaohongshu/web_v2/fetch_search_notes "keyword=lego"
+python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/xiaohongshu/app_v2/search_notes "keyword=lego"
 ```
 
 ## API Basics
@@ -178,7 +178,7 @@ python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/tiktok/web/fet
 python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/youtube/web/search_video "search_query=music"
 
 # Search Xiaohongshu notes
-python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/xiaohongshu/web_v2/fetch_search_notes "keyword=food"
+python .claude/skills/tikhub-api-helper/api_client.py GET /api/v1/xiaohongshu/app_v2/search_notes "keyword=food"
 ```
 
 ### Get Trending/Hot Content
