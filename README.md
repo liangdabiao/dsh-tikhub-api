@@ -4,6 +4,9 @@ DeepSeek Harness（dsh）插件：**TikHub 多平台社交媒体数据 API** 的
 
 技能来自 [tikhub_api_skill](https://github.com/liangdabiao/tikhub_api_skill)（liangdabiao）。
 
+<img width="1626" height="891" alt="image" src="https://github.com/user-attachments/assets/e3cc7ffc-9fb1-4aea-bd1c-50d7137b176f" />
+
+
 ## 使用
 
 需要 [TikHub](https://www.tikhub.io) token：侧栏「⚙️ 设置」里直接粘贴保存（或插件 Config / `TIKHUB_TOKEN` 环境变量）。
